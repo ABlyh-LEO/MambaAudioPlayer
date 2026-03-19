@@ -11,6 +11,9 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS ON)
 
 
 # Define the build type
@@ -27,8 +30,8 @@ include("cmake/gcc-arm-none-eabi.cmake")
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
-# Enable CMake support for ASM and C languages
-enable_language(C ASM)
+# Enable CMake support for ASM, C and C++ languages
+enable_language(C CXX ASM)
 
 # Core project settings
 project(${CMAKE_PROJECT_NAME})
@@ -46,13 +49,16 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Add sources to executable
+# user_bridge.cpp 是唯一的 C++ 源文件，链接 C 世界(main.c) 和 C++ 世界(user/)
+# 其余用户模块均为 header-only (.hpp)，通过 user_bridge.cpp 的 include 编译
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    user/user_bridge.cpp
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    # 用户代码根目录，使得 #include "HAL/hal_gpio.hpp" 等路径有效
+    user
 )
 
 # Add project symbols (macros)

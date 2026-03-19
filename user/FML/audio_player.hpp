@@ -280,13 +280,15 @@ private:
     volatile uint16_t bufPos_;             ///< 当前缓冲区内播放位置
     volatile bool bufReady_[2];            ///< 缓冲区就绪标志
     uint16_t bufFilled_[2];               ///< 每个缓冲区实际填充的字节数
-    volatile bool needFill_;               ///< 需要填充缓冲区标志
 
     // 纯音模式
     bool toneMode_;              ///< 是否为纯音模式
     uint16_t tonePhase_;         ///< 当前相位 (0 ~ tonePeriodSamples_-1)
     uint16_t tonePeriodSamples_; ///< 一个周期的采样点数
     uint32_t toneSamplesLeft_;   ///< 剩余采样点数
+
+    // 需要在主循环中填充缓冲区标志 (必须在 toneSamplesLeft_ 之后声明以匹配初始化顺序)
+    volatile bool needFill_;               ///< 需要填充缓冲区标志
 
     /**
      * @brief 填充指定缓冲区

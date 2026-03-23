@@ -1,0 +1,3 @@
+[submodule "MambaHost"]
+	path = MambaHost
+	url = https://github.com/ABlyh-LEO/MambaHost

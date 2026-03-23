@@ -155,6 +155,14 @@ public:
         batteryMonitor_.update(tick);
         ledIndicator_.update(tick);
         audioPlayer_.update();
+
+        // 同步系统状态到 UART 传输模块 (供 QUERY_STATUS 命令使用)
+        uartTransfer_.updateStatus(
+            batteryMonitor_.getVoltage(),
+            batteryMonitor_.getBatteryPercent(),
+            batteryMonitor_.isI2CAvailable(),
+            static_cast<uint8_t>(state_)  // 枚举值 0~3 直接对应协议定义
+        );
         uartTransfer_.processReceive();
 
         // 处理按键
@@ -163,11 +171,7 @@ public:
         // 状态机处理
         processStateMachine(tick);
 
-        // 定期日志输出
-        if (tick - lastLogTick_ >= LOG_INTERVAL_MS) {
-            lastLogTick_ = tick;
-            printStatus();
-        }
+        // 移除定期的 printStatus();，可通过上位机发送 QUERY_STATUS 查询状态
     }
 
     /**
@@ -252,8 +256,6 @@ private:
      * @details 按下按键后 60s 内不进行音频播放
      */
     void onButtonPressed(uint32_t tick) {
-        uart_.log("[MAMBA] Button pressed!\r\n");
-
         if (state_ == SystemState::LOW_BATTERY) {
             // 进入静音模式
             audioPlayer_.stop();
@@ -261,7 +263,6 @@ private:
             state_ = SystemState::MUTED;
             ledIndicator_.setState(fml::LedState::MUTED);
             alarmAudioStarted_ = false;
-            uart_.log("[MAMBA] Muted for 60 seconds\r\n");
         }
     }
 
@@ -291,7 +292,6 @@ private:
                     state_ = SystemState::LOW_BATTERY;
                     ledIndicator_.setState(fml::LedState::LOW_BATTERY);
                     alarmAudioStarted_ = false;
-                    uart_.log("[MAMBA] LOW BATTERY ALARM!\r\n");
                 } else {
                     ledIndicator_.setState(fml::LedState::NORMAL);
                 }
@@ -304,7 +304,6 @@ private:
                     state_ = SystemState::NORMAL;
                     ledIndicator_.setState(fml::LedState::NORMAL);
                     alarmAudioStarted_ = false;
-                    uart_.log("[MAMBA] Battery recovered\r\n");
                 } else if (!alarmAudioStarted_) {
                     // 启动报警音频
                     startAlarmAudio();
@@ -318,7 +317,6 @@ private:
             case SystemState::MUTED:
                 // 检查静音时间是否到期
                 if (tick - muteStartTick_ >= MUTE_DURATION_MS) {
-                    uart_.log("[MAMBA] Mute expired\r\n");
                     if (lowBattery) {
                         state_ = SystemState::LOW_BATTERY;
                         ledIndicator_.setState(fml::LedState::LOW_BATTERY);
@@ -332,7 +330,6 @@ private:
                 if (!lowBattery) {
                     state_ = SystemState::NORMAL;
                     ledIndicator_.setState(fml::LedState::NORMAL);
-                    uart_.log("[MAMBA] Battery recovered during mute\r\n");
                 }
                 break;
 
@@ -349,32 +346,13 @@ private:
      */
     void startAlarmAudio() {
         if (flashOk_ && audioPlayer_.playTrack(0, true)) {
-            uart_.log("[MAMBA] Playing alarm track 0 (loop)\r\n");
+            // Playing alarm track 0
         } else {
             // 第一段音频无效，播放 440Hz 报警音
-            // 440Hz 是国际标准音 A4，常用于报警提示
             audioPlayer_.playTone(440, 0);  // 0 = 无限循环
-            uart_.log("[MAMBA] Playing 440Hz tone alarm\r\n");
         }
     }
 
-    /** @brief 打印系统状态日志 */
-    void printStatus() {
-        uint32_t voltage = batteryMonitor_.getVoltage();
-        uint8_t percent = batteryMonitor_.getBatteryPercent();
-
-        uart_.log("[MAMBA] V_batt=%lumV (%u%%) I2C=%s State=",
-                  voltage, percent,
-                  batteryMonitor_.isI2CAvailable() ? "OK" : "N/A");
-
-        switch (state_) {
-            case SystemState::NORMAL:         uart_.log("NORMAL"); break;
-            case SystemState::LOW_BATTERY:    uart_.log("LOW_BATT"); break;
-            case SystemState::MUTED:          uart_.log("MUTED"); break;
-            case SystemState::AUDIO_TRANSFER: uart_.log("TRANSFER"); break;
-        }
-        uart_.log("\r\n");
-    }
 };
 
 } // namespace apl

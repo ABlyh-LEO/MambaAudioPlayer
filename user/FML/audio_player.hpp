@@ -4,7 +4,7 @@
  * @details 基于 PWM 模拟 DAC 的音频播放器，从 SPI Flash 读取 8-bit PCM 数据。
  *
  *          音频规格：
- *          - 采样率：16kHz (由 TIM1 PWM 频率决定)
+ *          - 采样率：16kHz (由 TIM1 RCR 分频决定: 256kHz PWM / RCR=16 = 16kHz)
  *          - 位深：8-bit unsigned PCM
  *          - 声道：单声道
  *
@@ -37,7 +37,6 @@
 #include "HDL/amp_control.hpp"
 #include "HAL/hal_pwm.hpp"
 #include <cstring>
-#include <cmath>
 
 namespace fml {
 
@@ -53,8 +52,8 @@ public:
     static constexpr uint16_t BUFFER_SIZE = 256;
 
     /// 音量缩放最大值 (80% 占空比限制，保护扬声器)
-    /// 最大 CCR = sample * 125 / 8 * volume / 100
-    /// 当 volume=80 时，最大 CCR = 255 * 125 / 8 * 80 / 100 = 3187 (< 4000)
+    /// 最大 CCR = sample * 125 / 128 * volume / 100
+    /// 当 volume=80 时，最大 CCR = 255 * 125 / 128 * 80 / 100 ≈ 199 (< 250)
     static constexpr uint8_t MAX_VOLUME = 80;
 
     /// 默认音量
@@ -232,9 +231,9 @@ public:
         }
 
         // 设置 PWM CCR (含音量缩放)
-        // CCR = sample * 125 / 8 → 映射到 0~3984
+        // 新公式 (Period=249): CCR = sample * 125 / 128 → 映射到 0~249
         // 再 * volume / 100 → 音量缩放
-        uint32_t ccr = static_cast<uint32_t>(sample) * 125UL / 8UL;
+        uint32_t ccr = static_cast<uint32_t>(sample) * 125UL / 128UL;
         ccr = ccr * volume_ / 100;
         pwm_.setCompare(ccr);
     }

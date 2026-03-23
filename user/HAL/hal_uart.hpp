@@ -8,8 +8,6 @@
 #define HAL_UART_HPP
 
 #include "main.h"
-#include <cstdarg>
-#include <cstdio>
 #include <cstring>
 
 namespace hal {
@@ -66,22 +64,24 @@ public:
     }
 
     /**
-     * @brief 格式化日志输出（printf 风格）
+     * @brief 格式化日志输出（printf 风格）- ⚠️ 已禁用以节省 Flash
      * @param fmt 格式字符串
      * @param ... 可变参数
-     * @details 使用阻塞模式发送，适用于调试日志。
-     *          最大输出长度为 TX_BUF_SIZE 字节。
+     * @details 为缩小编译体积 (节省近 5KB Flash)，日志输出功能已被空实现。
+     *          当前状态查询可通过 QUERY_STATUS 命令从上位机获取。
+     *          如有调试需要，可还原内部 vsnprintf 实现。
      */
     void log(const char* fmt, ...) {
-        char buf[TX_BUF_SIZE];
-        va_list args;
-        va_start(args, fmt);
-        int len = vsnprintf(buf, TX_BUF_SIZE, fmt, args);
-        va_end(args);
-        if (len > 0) {
-            transmit(reinterpret_cast<const uint8_t*>(buf),
-                     static_cast<uint16_t>(len), 500);
-        }
+        (void)fmt;
+        // 已注释以节省 Flash
+        // char buf[TX_BUF_SIZE];
+        // va_list args;
+        // va_start(args, fmt);
+        // int len = vsnprintf(buf, TX_BUF_SIZE, fmt, args);
+        // va_end(args);
+        // if (len > 0) {
+        //     transmit(reinterpret_cast<const uint8_t*>(buf), static_cast<uint16_t>(len), 500);
+        // }
     }
 
     /** @brief 获取底层 UART 句柄 */

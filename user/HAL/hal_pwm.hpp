@@ -2,15 +2,23 @@
  * @file    hal_pwm.hpp
  * @brief   PWM 硬件抽象层封装
  * @details 对 STM32 HAL 库的 TIM PWM 输出进行封装。
- *          TIM1_CH1 配置：Prescaler=0, Period=3999, 即 64MHz/4000 = 16kHz PWM 频率。
- *          用于通过 PWM 模拟 DAC 输出音频信号。
+ *
+ *          TIM1_CH1 配置 (高频 PWM + RCR 分频实现精确采样率):
+ *          - Prescaler = 0
+ *          - Period (ARR) = 249 → PWM 频率 = 64MHz / 250 = 256kHz
+ *          - RepetitionCounter (RCR) = 15 → Update 中断频率 = 256kHz / 16 = 16kHz
+ *
+ *          设计原理：
+ *          PWM 频率 (256kHz) 远高于 RC 低通滤波器截止频率 (1kΩ+10nF → f_c≈15.9kHz)，
+ *          滤波器在 256kHz 处衰减约 -24dB，能有效去除 PWM 开关纹波。
+ *          RCR=15 使得 TIM Update 中断 (用于更新音频采样值) 恰好以 16kHz 触发。
  *
  *          PWM 占空比与音频采样值的关系：
  *          - 8-bit 音频采样值范围: 0~255
- *          - PWM ARR (Period) = 3999
- *          - 映射关系：CCR = sample * 3999 / 255 ≈ sample * 15.68
- *          - 简化为：CCR = sample * 16 (略微偏大但足够精确)
- *          - 或更精确：CCR = (uint32_t)sample * 4000 / 256
+ *          - PWM ARR (Period) = 249，共 250 个计数级
+ *          - 映射关系：CCR = sample * 250 / 256
+ *          - 整数运算：CCR = (uint32_t)sample * 125 / 128
+ *          - 当 sample=255 时，CCR = 255*125/128 = 249 (恰好等于 ARR)
  */
 #ifndef HAL_PWM_HPP
 #define HAL_PWM_HPP
@@ -23,7 +31,9 @@ namespace hal {
  * @class Pwm
  * @brief PWM 输出抽象类
  * @details 封装 TIM PWM 的启停和占空比设置操作。
- *          支持通过 TIM Update 中断实现周期性占空比刷新。
+ *          配合高级定时器的 RepetitionCounter 功能，
+ *          Update 中断仅在 RCR+1 次 PWM 周期后触发一次，
+ *          实现"高频 PWM + 低频采样更新"的分离。
  */
 class Pwm {
 public:
@@ -47,8 +57,8 @@ public:
 
     /**
      * @brief 启动 PWM 输出并使能 Update 中断
-     * @details Update 中断在每个 PWM 周期结束时触发，
-     *          用于更新下一个音频采样值的 CCR。
+     * @details 由于 RCR=15，Update 中断每 16 个 PWM 周期触发一次，
+     *          即频率 = 256kHz / 16 = 16kHz，恰好匹配音频采样率。
      */
     void startWithIT() {
         HAL_TIM_PWM_Start(htim_, channel_);
@@ -65,7 +75,7 @@ public:
      * @brief 直接设置 CCR 值（即占空比原始值）
      * @param ccr 比较寄存器值 (0 ~ Period)
      * @details CCR / (Period+1) = 占空比
-     *          当 Period=3999 时，CCR=2000 即 50% 占空比
+     *          当 Period=249 时，CCR=125 即 50% 占空比
      */
     void setCompare(uint32_t ccr) {
         __HAL_TIM_SET_COMPARE(htim_, channel_, ccr);
@@ -75,13 +85,13 @@ public:
      * @brief 将 8-bit 音频采样值转换为 CCR 并设置
      * @param sample 8-bit 无符号音频采样值 (0~255)
      * @details 映射公式：CCR = sample * (Period+1) / 256
-     *          当 Period=3999 时：CCR = sample * 4000 / 256 = sample * 15.625
-     *          使用整数运算：CCR = (uint32_t)sample * 4000 / 256
+     *          当 Period=249 时：CCR = sample * 250 / 256 = sample * 125 / 128
+     *          验证：sample=0 → CCR=0, sample=255 → CCR=249 ✓
      */
     void setAudioSample(uint8_t sample) {
-        // 将 8-bit 采样值映射到 0~3999 的 CCR 范围
-        // CCR = sample * 4000 / 256 = sample * 125 / 8
-        uint32_t ccr = static_cast<uint32_t>(sample) * 125UL / 8UL;
+        // 将 8-bit 采样值映射到 0~249 的 CCR 范围
+        // CCR = sample * 250 / 256 = sample * 125 / 128
+        uint32_t ccr = static_cast<uint32_t>(sample) * 125UL / 128UL;
         __HAL_TIM_SET_COMPARE(htim_, channel_, ccr);
     }
 

@@ -90,15 +90,26 @@ public:
 
     /**
      * @brief 清除 UART 错误标志并重置接收状态
-     * @details 清除 ORE/FE/NE/PE 等错误标志，若 RxState 非 READY 则中止接收。
-     *          用于在 HAL_UARTEx_ReceiveToIdle_DMA 失败后恢复正常状态。
+     * @details 清除 ORE/FE/NE/PE 等错误标志，强制中止当前接收并重置状态机。
+     *          用于从 Overrun 等硬件错误中恢复。
      */
     void clearErrors() {
+        // 清除错误标志
         __HAL_UART_CLEAR_FLAG(huart_, UART_CLEAR_OREF | UART_CLEAR_FEF
                                       | UART_CLEAR_NEF | UART_CLEAR_PEF);
-        if (huart_->RxState != HAL_UART_STATE_READY) {
+        
+        // 即使状态是 READY，如果 ErrorCode 还在，也要重置
+        if (huart_->RxState != HAL_UART_STATE_READY || huart_->ErrorCode != HAL_UART_ERROR_NONE) {
             HAL_UART_AbortReceive(huart_);
         }
+    }
+
+    /**
+     * @brief 检查 UART 接收是否正在进行 (DMA)
+     * @return true 正在接收; false 空闲
+     */
+    bool isBusyRx() const {
+        return huart_->RxState != HAL_UART_STATE_READY;
     }
 
     /** @brief 获取底层 UART 句柄 */

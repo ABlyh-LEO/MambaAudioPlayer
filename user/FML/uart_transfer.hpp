@@ -193,8 +193,8 @@ public:
           expectedSeq_(0), trackIndex_(0),
           writeAddr_(0), totalSize_(0), receivedSize_(0),
           sampleRate_(32000), bits_(8), lastErasedSector_(0xFFFFFFFF),
-          rxLen_(0) {
-        memset(rxBuf_, 0, sizeof(rxBuf_));
+          rxWriteIdx_(0), rxReadIdx_(0), rxCount_(0) {
+        memset(rxBufs_, 0, sizeof(rxBufs_));
     }
 
     /**
@@ -210,7 +210,12 @@ public:
      * @param size 本次接收到的数据长度
      */
     void onReceiveComplete(uint16_t size) {
-        rxLen_ = size;
+        if (size == Protocol::PACKET_TOTAL_SIZE) {
+            rxWriteIdx_ = (rxWriteIdx_ + 1) % 2;
+            if (rxCount_ < 2) rxCount_++;
+        }
+        // 尽快重启接收，使用另一个缓冲区
+        startReceive();
     }
 
     /**
@@ -218,14 +223,10 @@ public:
      * @details 检查是否有新数据到达，解析并处理
      */
     void processReceive() {
-        if (rxLen_ == 0) return;
-
-        uint16_t len = rxLen_;
-        rxLen_ = 0;
-
-        // 检查是否为完整数据包
-        if (len >= Protocol::PACKET_TOTAL_SIZE) {
-            Packet* pkt = reinterpret_cast<Packet*>(rxBuf_);
+        // 1. 处理待处理的包
+        while (rxCount_ > 0) {
+            uint8_t* buf = rxBufs_[rxReadIdx_];
+            Packet* pkt = reinterpret_cast<Packet*>(buf);
 
             // 验证包头
             if (pkt->header[0] == Protocol::HEADER_0 &&
@@ -233,19 +234,26 @@ public:
 
                 // 验证 CRC16
                 uint16_t calcCrc = crc16Ccitt(
-                    &rxBuf_[2],  // 从 CMD 开始
+                    &buf[2],  // 从 CMD 开始
                     Protocol::PACKET_TOTAL_SIZE - 4  // 减去 HEADER 和 CRC
                 );
 
                 if (calcCrc == pkt->crc16) {
                     handlePacket(*pkt);
                 }
-                // CRC 失败则丢弃，不回复
             }
+
+            // 指向下一个缓冲区
+            rxReadIdx_ = (rxReadIdx_ + 1) % 2;
+            __disable_irq();
+            rxCount_--;
+            __enable_irq();
         }
 
-        // 处理完成后重新启动接收
-        startReceive();
+        // 2. 尽力而为：确保 DMA 接收始终处于活动状态 (防止 Overrun 后未成功重启)
+        if (!uart_.isBusyRx()) {
+            startReceive();
+        }
     }
 
     /** @brief 获取传输状态 */
@@ -283,16 +291,24 @@ private:
     uint8_t  bits_;                ///< 位深
     uint32_t lastErasedSector_;    ///< 最近擦除的扇区地址 (按需擦除用)
 
-    uint8_t  rxBuf_[RX_BUF_SIZE]; ///< 接收缓冲区
-    volatile uint16_t rxLen_;      ///< 已接收数据长度
+    uint8_t  rxBufs_[2][Protocol::PACKET_TOTAL_SIZE]; ///< 双接收缓冲区
+    volatile uint8_t  rxWriteIdx_;  ///< 当前正在写入的缓冲区索引
+    volatile uint8_t  rxReadIdx_;   ///< 当前正在处理的缓冲区索引
+    volatile uint8_t  rxCount_;     ///< 待处理的包数量
     SystemStatusInfo statusInfo_;  ///< 系统状态快照
 
     /** @brief 启动一次新的数据接收 (定长 136 字节) */
     void startReceive() {
-        HAL_StatusTypeDef status = uart_.receiveDMA(rxBuf_, Protocol::PACKET_TOTAL_SIZE);
+        // 如果当前缓冲区还在处理，则不能覆盖 (虽然双缓冲极少发生这种情况)
+        if (rxCount_ >= 2) return;
+        
+        // 尝试启动 DMA
+        HAL_StatusTypeDef status = uart_.receiveDMA(rxBufs_[rxWriteIdx_], Protocol::PACKET_TOTAL_SIZE);
+        
         if (status != HAL_OK) {
+            // 如果因为 Overrun 等错误失败，尝试清除错误并强行重置后重试
             uart_.clearErrors();
-            uart_.receiveDMA(rxBuf_, Protocol::PACKET_TOTAL_SIZE);
+            uart_.receiveDMA(rxBufs_[rxWriteIdx_], Protocol::PACKET_TOTAL_SIZE);
         }
     }
 

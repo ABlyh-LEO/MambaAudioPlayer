@@ -270,11 +270,10 @@ private:
     void onButtonPressed(uint32_t tick) {
         if (state_ == SystemState::LOW_BATTERY) {
             // 进入静音模式
-            audioPlayer_.stop();
+            audioPlayer_.pause();
             muteStartTick_ = tick;
             state_ = SystemState::MUTED;
             ledIndicator_.setState(fml::LedState::MUTED);
-            alarmAudioStarted_ = false;
         }
     }
 
@@ -311,13 +310,16 @@ private:
 
             case SystemState::LOW_BATTERY:
                 if (!lowBattery) {
-                    // 电量恢复
-                    audioPlayer_.stop();
+                    // 电量恢复，暂停报警 (保留 session, 下下次报警可续播)
+                    audioPlayer_.pause();
                     state_ = SystemState::NORMAL;
                     ledIndicator_.setState(fml::LedState::NORMAL);
-                    alarmAudioStarted_ = false;
+                    // alarmAudioStarted_ 保持 true
+                } else if (audioPlayer_.isPaused()) {
+                    // 从静音恢复，继续播放
+                    audioPlayer_.resume();
                 } else if (!alarmAudioStarted_) {
-                    // 启动报警音频
+                    // 首次启动报警音频
                     startAlarmAudio();
                     alarmAudioStarted_ = true;
                 } else if (!audioPlayer_.isPlaying()) {
@@ -340,8 +342,10 @@ private:
                 }
                 // 静音期间也检查电池是否恢复
                 if (!lowBattery) {
+                    audioPlayer_.pause();  // 也要从静音状态同步恢复为暂停
                     state_ = SystemState::NORMAL;
                     ledIndicator_.setState(fml::LedState::NORMAL);
+                    // alarmAudioStarted_ 保持 true
                 }
                 break;
 

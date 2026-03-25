@@ -6,12 +6,12 @@
  *          TIM1_CH1 配置 (高频 PWM + RCR 分频实现精确采样率):
  *          - Prescaler = 0
  *          - Period (ARR) = 249 → PWM 频率 = 64MHz / 250 = 256kHz
- *          - RepetitionCounter (RCR) = 15 → Update 中断频率 = 256kHz / 16 = 16kHz
+ *          - RepetitionCounter (RCR) = 7 → Update 中断频率 = 256kHz / 8 = 32kHz
  *
  *          设计原理：
  *          PWM 频率 (256kHz) 远高于 RC 低通滤波器截止频率 (1kΩ+10nF → f_c≈15.9kHz)，
  *          滤波器在 256kHz 处衰减约 -24dB，能有效去除 PWM 开关纹波。
- *          RCR=15 使得 TIM Update 中断 (用于更新音频采样值) 恰好以 16kHz 触发。
+ *          RCR=7 使得 TIM Update 中断 (用于更新音频采样值) 恰好以 32kHz 触发。
  *
  *          PWM 占空比与音频采样值的关系：
  *          - 8-bit 音频采样值范围: 0~255
@@ -57,8 +57,8 @@ public:
 
     /**
      * @brief 启动 PWM 输出并使能 Update 中断
-     * @details 由于 RCR=15，Update 中断每 16 个 PWM 周期触发一次，
-     *          即频率 = 256kHz / 16 = 16kHz，恰好匹配音频采样率。
+     * @details 由于 RCR=7，Update 中断每 8 个 PWM 周期触发一次，
+     *          即频率 = 256kHz / 8 = 32kHz，恰好匹配音频采样率。
      */
     void startWithIT() {
         HAL_TIM_PWM_Start(htim_, channel_);

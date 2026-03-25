@@ -187,7 +187,7 @@ public:
           state_(TransferState::IDLE),
           expectedSeq_(0), trackIndex_(0),
           writeAddr_(0), totalSize_(0), receivedSize_(0),
-          sampleRate_(16000), bits_(8), lastErasedSector_(0xFFFFFFFF),
+          sampleRate_(32000), bits_(8), lastErasedSector_(0xFFFFFFFF),
           rxLen_(0) {
         memset(rxBuf_, 0, sizeof(rxBuf_));
     }

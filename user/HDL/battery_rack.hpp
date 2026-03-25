@@ -56,6 +56,7 @@ constexpr uint8_t BATTERY_RACK_ADDR = 0x41;
  * @brief 电池信息综合数据结构
  * @details 存储从电池架读取的所有信息
  */
+#pragma pack(push, 1)
 struct BatteryInfo {
     // 静态数据
     uint32_t designed_capacity;  ///< 设计容量 (mAh)
@@ -71,6 +72,7 @@ struct BatteryInfo {
     uint8_t  internal_state;     ///< 内部状态原始值
     uint8_t  error_state;        ///< 错误状态原始值
 };
+#pragma pack(pop)
 
 /**
  * @struct ProductionDate

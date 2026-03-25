@@ -225,7 +225,7 @@ private:
     fml::AudioPlayer     audioPlayer_     {flash_, amp_, pwm_};          ///< 音频播放器
     fml::BatteryMonitor  batteryMonitor_  {adc_, batteryRack_};          ///< 电池监测
     fml::LedIndicator    ledIndicator_    {gpioLed_, ws2812_};           ///< LED 指示灯
-    fml::UartTransfer    uartTransfer_    {uart_, flash_};               ///< UART 传输
+    fml::UartTransfer    uartTransfer_    {uart_, flash_, batteryMonitor_}; ///< UART 传输
 
     // ========== 状态变量 ==========
     SystemState state_          = SystemState::NORMAL;  ///< 系统状态

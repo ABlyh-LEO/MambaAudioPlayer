@@ -99,6 +99,7 @@
 
 #include "HAL/hal_uart.hpp"
 #include "HDL/w25q64_driver.hpp"
+#include "FML/battery_monitor.hpp"
 #include <cstring>
 
 namespace fml {
@@ -118,6 +119,7 @@ namespace NakError {
     constexpr uint8_t NO_SPACE        = 2;  ///< Flash 空间不足
     constexpr uint8_t BAD_PARAM       = 3;  ///< 参数错误
     constexpr uint8_t OP_FAILED       = 4;  ///< 操作失败
+    constexpr uint8_t I2C_OFFLINE     = 5;  ///< I2C 电池架离线
 }
 
 /// 协议常量
@@ -145,6 +147,8 @@ namespace Protocol {
     constexpr uint8_t CMD_QUERY_STATUS   = 0x32;
     constexpr uint8_t CMD_STATUS_RESPONSE= 0x33;
     constexpr uint8_t CMD_DEFRAG         = 0x34;
+    constexpr uint8_t CMD_QUERY_BATT_INFO = 0x35;  ///< 查询 I2C 电池详细信息 (上位机→下位机)
+    constexpr uint8_t CMD_BATT_INFO_RESPONSE = 0x36; ///< 电池详细信息响应 (下位机→上位机)
 }
 
 /// 数据包结构
@@ -181,9 +185,10 @@ public:
      * @brief 构造函数
      * @param uart  UART 抽象层引用
      * @param flash W25Q64 驱动引用
+     * @param batt  电池监测模块引用
      */
-    UartTransfer(hal::Uart& uart, hdl::W25Q64Driver& flash)
-        : uart_(uart), flash_(flash),
+    UartTransfer(hal::Uart& uart, hdl::W25Q64Driver& flash, fml::BatteryMonitor& batt)
+        : uart_(uart), flash_(flash), batt_(batt),
           state_(TransferState::IDLE),
           expectedSeq_(0), trackIndex_(0),
           writeAddr_(0), totalSize_(0), receivedSize_(0),
@@ -266,6 +271,7 @@ public:
 private:
     hal::Uart& uart_;             ///< UART 引用
     hdl::W25Q64Driver& flash_;    ///< Flash 驱动引用
+    fml::BatteryMonitor& batt_;   ///< 电池监测引用
 
     TransferState state_;          ///< 当前传输状态
     uint16_t expectedSeq_;         ///< 期望的下一个包序号
@@ -355,6 +361,7 @@ private:
             case Protocol::CMD_FORMAT_ALL:     handleFormatAll();        break;
             case Protocol::CMD_QUERY_STATUS:   handleQueryStatus();      break;
             case Protocol::CMD_DEFRAG:         handleDefrag();           break;
+            case Protocol::CMD_QUERY_BATT_INFO: handleQueryBattInfo();    break;
             default: break;
         }
     }
@@ -575,6 +582,20 @@ private:
         buf[pos++] = trackCount;
 
         sendResponse(Protocol::CMD_STATUS_RESPONSE, buf, pos);
+    }
+
+    /** @brief 处理查询 I2C 电池详细信息 */
+    void handleQueryBattInfo() {
+        if (!batt_.isI2CAvailable()) {
+            sendNak(NakError::I2C_OFFLINE);
+            return;
+        }
+
+        const hdl::BatteryInfo& info = batt_.getBatteryInfo();
+        // BatteryInfo 结构体大小为 22 字节，直接发送原始内存
+        sendResponse(Protocol::CMD_BATT_INFO_RESPONSE, 
+                     reinterpret_cast<const uint8_t*>(&info), 
+                     sizeof(hdl::BatteryInfo));
     }
 
     /**

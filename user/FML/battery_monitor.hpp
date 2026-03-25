@@ -155,8 +155,12 @@ private:
 
     /** @brief 更新 I2C 连接状态和数据 */
     void updateI2cConnection() {
+        bool wasAvailable = i2cAvailable_;
         i2cAvailable_ = rack_.isConnected();
+        
         if (i2cAvailable_) {
+            // 如果刚连接上，或者为了保险，每次都读取静态数据 (静态数据也就 10 字节左右)
+            rack_.readStaticData(batteryInfo_);
             rack_.readDynamicData(batteryInfo_);
         }
     }

@@ -109,6 +109,7 @@ public:
         } else {
             uart_.log("[MAMBA] W25Q64 init FAILED!\r\n");
             flashOk_ = false;
+            ws2812_.setColor(255, 80, 0);  // 橙色 = Flash 初始化失败
         }
 
         // 初始化电池监测
@@ -151,10 +152,21 @@ public:
     void loop() {
         uint32_t tick = HAL_GetTick();
 
+        // 优先处理 UART 接收 (减少 I2C/WS2812 阻塞后的响应延迟)
+        uartTransfer_.processReceive();
+
         // 更新各模块
         batteryMonitor_.update(tick);
         ledIndicator_.update(tick);
-        audioPlayer_.update();
+
+        // 传输期间禁止音频播放 (避免 SPI Flash 总线竞争)
+        if (uartTransfer_.isTransferring()) {
+            if (audioPlayer_.isPlaying()) {
+                audioPlayer_.stop();
+            }
+        } else {
+            audioPlayer_.update();
+        }
 
         // 同步系统状态到 UART 传输模块 (供 QUERY_STATUS 命令使用)
         uartTransfer_.updateStatus(

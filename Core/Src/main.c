@@ -308,7 +308,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 7;
   hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
@@ -518,11 +518,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 }
 
 /**
- * @brief UART 接收事件回调 (DMA 空闲中断)
+ * @brief UART 接收完成回调 (普通 DMA 接收，收到指定长度触发)
  */
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-  User_UART_RxEventCallback(huart, Size);
+  User_UART_RxCpltCallback(huart);
 }
 
 /* USER CODE END 4 */

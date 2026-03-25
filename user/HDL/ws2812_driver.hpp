@@ -103,57 +103,56 @@ private:
 
     /**
      * @brief 发送逻辑 "0"
-     * @details T0H ≈ 0.4μs (26 cycles @64MHz)
-     *          T0L ≈ 0.85μs (54 cycles @64MHz)
-     *          使用 BSRR 寄存器直接操作，比 HAL 函数快得多
+     * @details T0H ≈ 0.35μs (~22 cycles @64MHz)
+     *          T0L ≈ 0.90μs (~58 cycles @64MHz)
+     *          使用 BSRR/BRR 寄存器直接操作 + 固定 NOP 序列，
+     *          避免 volatile 循环引入额外开销导致时序偏差。
      */
-    inline void sendBit0() {
-        // 拉高数据线 (T0H)
-        port_->BSRR = pin_;
-        // 延时约 0.35~0.4μs (约 22~26 个 NOP)
-        nopDelay(20);
-        // 拉低数据线 (T0L)
-        port_->BRR = pin_;
-        // 延时约 0.8~0.85μs (约 50~54 个 NOP)
-        nopDelay(46);
+    inline void __attribute__((always_inline)) sendBit0() {
+        port_->BSRR = pin_;         // 拉高 (T0H 开始)
+        // T0H ≈ 0.35μs: 寄存器写入约 2 cycles + 20 NOP = ~22 cycles
+        NOP20();
+        port_->BRR = pin_;          // 拉低 (T0L 开始)
+        // T0L ≈ 0.90μs: 寄存器写入约 2 cycles + 50 NOP = ~52 cycles
+        NOP20(); NOP20(); NOP10();
     }
 
     /**
      * @brief 发送逻辑 "1"
-     * @details T1H ≈ 0.8μs (51 cycles @64MHz)
-     *          T1L ≈ 0.45μs (29 cycles @64MHz)
+     * @details T1H ≈ 0.70μs (~45 cycles @64MHz)
+     *          T1L ≈ 0.60μs (~38 cycles @64MHz)
      */
-    inline void sendBit1() {
-        // 拉高数据线 (T1H)
-        port_->BSRR = pin_;
-        // 延时约 0.7~0.8μs (约 45~51 个 NOP)
-        nopDelay(45);
-        // 拉低数据线 (T1L)
-        port_->BRR = pin_;
-        // 延时约 0.4~0.45μs (约 25~29 个 NOP)
-        nopDelay(22);
+    inline void __attribute__((always_inline)) sendBit1() {
+        port_->BSRR = pin_;         // 拉高 (T1H 开始)
+        // T1H ≈ 0.70μs: 寄存器写入约 2 cycles + 40 NOP = ~42 cycles
+        NOP20(); NOP20();
+        port_->BRR = pin_;          // 拉低 (T1L 开始)
+        // T1L ≈ 0.60μs: 寄存器写入约 2 cycles + 28 NOP = ~30 cycles
+        NOP20(); NOP5(); NOP3();
     }
 
-    /**
-     * @brief NOP 延时
-     * @param count NOP 指令数量
-     * @details 每个 NOP 在 Cortex-M0+ @64MHz 上约 15.625ns
-     *          使用内联汇编确保编译器不会优化掉
-     */
-    static inline void nopDelay(uint32_t count) {
-        for (volatile uint32_t i = 0; i < count; ++i) {
-            __NOP();
-        }
+    // ==== 固定长度 NOP 宏 (编译器无法优化掉) ====
+    static inline void __attribute__((always_inline)) NOP3() {
+        __NOP(); __NOP(); __NOP();
+    }
+    static inline void __attribute__((always_inline)) NOP5() {
+        __NOP(); __NOP(); __NOP(); __NOP(); __NOP();
+    }
+    static inline void __attribute__((always_inline)) NOP10() {
+        NOP5(); NOP5();
+    }
+    static inline void __attribute__((always_inline)) NOP20() {
+        NOP10(); NOP10();
     }
 
     /**
      * @brief 发送 Reset 信号
-     * @details 数据线保持低电平超过 50μs
-     *          使用 HAL_Delay 足够（精度 1ms，远超 50μs 要求）
+     * @details 数据线保持低电平超过 50μs (实际约 80μs)
      */
     void resetSignal() {
         port_->BRR = pin_;  // 拉低
-        // 延迟约 80μs
+        // 延迟约 80μs —— 这里用 volatile 循环是安全的，
+        // 因为 Reset 只要求 >50μs，长一点没关系
         for (volatile uint32_t i = 0; i < 400; ++i) {
             __NOP();
         }

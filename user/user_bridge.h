@@ -30,11 +30,10 @@ void User_App_Loop(void);
 void User_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim);
 
 /**
- * @brief UART 接收事件回调 (DMA 空闲中断)
+ * @brief UART 接收完成回调
  * @param huart UART 句柄
- * @param Size  接收到的数据长度
  */
-void User_UART_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size);
+void User_UART_RxCpltCallback(UART_HandleTypeDef* huart);
 
 #ifdef __cplusplus
 }

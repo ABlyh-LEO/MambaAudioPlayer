@@ -126,7 +126,7 @@ namespace Protocol {
     constexpr uint8_t  HEADER_1         = 0x55;
     constexpr uint8_t  PACKET_DATA_SIZE = 128;    ///< DATA 字段长度
     constexpr uint16_t PACKET_TOTAL_SIZE = 136;   ///< 整包长度
-    constexpr uint8_t  ACK_INTERVAL     = 8;      ///< 每 N 个包确认一次
+    constexpr uint8_t  ACK_INTERVAL     = 1;      ///< 包级同步：每发送一个包确认一次，避免MCU擦除扇区时丢失数据
 
     // === 音频传输命令 ===
     constexpr uint8_t CMD_START_TRANSFER = 0x01;
@@ -187,7 +187,7 @@ public:
           state_(TransferState::IDLE),
           expectedSeq_(0), trackIndex_(0),
           writeAddr_(0), totalSize_(0), receivedSize_(0),
-          sampleRate_(16000), bits_(8),
+          sampleRate_(16000), bits_(8), lastErasedSector_(0xFFFFFFFF),
           rxLen_(0) {
         memset(rxBuf_, 0, sizeof(rxBuf_));
     }
@@ -239,7 +239,7 @@ public:
             }
         }
 
-        // 重新启动接收
+        // 处理完成后重新启动接收
         startReceive();
     }
 
@@ -275,14 +275,19 @@ private:
     uint32_t receivedSize_;        ///< 已接收大小
     uint16_t sampleRate_;          ///< 采样率
     uint8_t  bits_;                ///< 位深
+    uint32_t lastErasedSector_;    ///< 最近擦除的扇区地址 (按需擦除用)
 
     uint8_t  rxBuf_[RX_BUF_SIZE]; ///< 接收缓冲区
     volatile uint16_t rxLen_;      ///< 已接收数据长度
     SystemStatusInfo statusInfo_;  ///< 系统状态快照
 
-    /** @brief 启动 UART DMA 接收 */
+    /** @brief 启动一次新的数据接收 (定长 136 字节) */
     void startReceive() {
-        uart_.receiveToIdleDMA(rxBuf_, RX_BUF_SIZE);
+        HAL_StatusTypeDef status = uart_.receiveDMA(rxBuf_, Protocol::PACKET_TOTAL_SIZE);
+        if (status != HAL_OK) {
+            uart_.clearErrors();
+            uart_.receiveDMA(rxBuf_, Protocol::PACKET_TOTAL_SIZE);
+        }
     }
 
     // ====================================================================
@@ -311,6 +316,8 @@ private:
             Protocol::PACKET_TOTAL_SIZE - 4
         );
         uart_.transmit(reinterpret_cast<uint8_t*>(&resp), Protocol::PACKET_TOTAL_SIZE);
+        // 等待 UART 发送完毕 (TC 标志), 避免紧接着 re-arm DMA 时 UART 状态异常
+        while (!__HAL_UART_GET_FLAG(uart_.getHandle(), UART_FLAG_TC)) {}
     }
 
     /** @brief 发送 ACK */
@@ -370,6 +377,14 @@ private:
             return;
         }
 
+        // 限制最大传输大小 (不超过 Flash 数据区容量)
+        uint32_t maxDataSize = hdl::W25Q64Param::TOTAL_SIZE
+                               - hdl::AudioIndex::AUDIO_DATA_BASE;
+        if (totalSize_ == 0 || totalSize_ > maxDataSize) {
+            sendNak(NakError::BAD_PARAM);
+            return;
+        }
+
         // 查找可用空间 (排除当前 trackIndex 以便覆盖上传时复用其空间)
         writeAddr_ = findWriteAddress(totalSize_, trackIndex_);
         if (writeAddr_ == 0xFFFFFFFF) {
@@ -379,15 +394,10 @@ private:
 
         receivedSize_ = 0;
         expectedSeq_ = 1;
+        lastErasedSector_ = 0xFFFFFFFF;
         state_ = TransferState::RECEIVING;
 
-        // 擦除所需扇区
-        uint32_t sectorsNeeded = (totalSize_ + hdl::W25Q64Param::SECTOR_SIZE - 1)
-                                 / hdl::W25Q64Param::SECTOR_SIZE;
-        for (uint32_t i = 0; i < sectorsNeeded; ++i) {
-            flash_.sectorErase(writeAddr_ + i * hdl::W25Q64Param::SECTOR_SIZE);
-        }
-
+        // 先回复 ACK (不预擦除扇区, 改为在 handleDataPacket 中按需擦除)
         sendAck(0);
     }
 
@@ -403,7 +413,20 @@ private:
         uint16_t dataLen = pkt.len;
         if (dataLen > Protocol::PACKET_DATA_SIZE) dataLen = Protocol::PACKET_DATA_SIZE;
 
-        flash_.writeData(writeAddr_ + receivedSize_, pkt.data, dataLen);
+        // 按需擦除：检查即将写入的地址范围是否覆盖了新的扇区
+        uint32_t writeStart = writeAddr_ + receivedSize_;
+        uint32_t writeEnd   = writeStart + dataLen;
+        for (uint32_t addr = writeStart; addr < writeEnd;
+             addr = (addr & ~(hdl::W25Q64Param::SECTOR_SIZE - 1))
+                    + hdl::W25Q64Param::SECTOR_SIZE) {
+            uint32_t sector = addr & ~(hdl::W25Q64Param::SECTOR_SIZE - 1);
+            if (sector != lastErasedSector_) {
+                flash_.sectorErase(sector);
+                lastErasedSector_ = sector;
+            }
+        }
+
+        flash_.writeData(writeStart, pkt.data, dataLen);
         receivedSize_ += dataLen;
         ++expectedSeq_;
 

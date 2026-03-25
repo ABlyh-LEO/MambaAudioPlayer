@@ -127,17 +127,20 @@ public:
     /**
      * @brief 读取 JEDEC ID
      * @return 24-bit JEDEC ID (Manufacturer[23:16] | MemType[15:8] | Capacity[7:0])
+     * @details 使用 TransmitReceive 避免 STM32G0 SPI RX FIFO 残留问题:
+     *          单独调用 Transmit + Receive 会导致 RX FIFO 中残留脏数据,
+     *          使得后续 Receive 读到的 ID 偏移或错误。
      */
     uint32_t readJEDEC() {
-        uint8_t cmd = W25Q64Cmd::READ_JEDEC_ID;
-        uint8_t id[3] = {0};
+        uint8_t tx[4] = {W25Q64Cmd::READ_JEDEC_ID, 0xFF, 0xFF, 0xFF};
+        uint8_t rx[4] = {0};
         csSelect();
-        spi_.transmit(&cmd, 1);
-        spi_.receive(id, 3);
+        spi_.transmitReceive(tx, rx, 4);
         csDeselect();
-        return (static_cast<uint32_t>(id[0]) << 16) |
-               (static_cast<uint32_t>(id[1]) << 8) |
-               id[2];
+        // rx[0] = 命令阶段的垃圾数据, rx[1..3] = JEDEC ID
+        return (static_cast<uint32_t>(rx[1]) << 16) |
+               (static_cast<uint32_t>(rx[2]) << 8) |
+               rx[3];
     }
 
     /**
@@ -155,7 +158,7 @@ public:
         cmd[2] = static_cast<uint8_t>((addr >> 8) & 0xFF);   // 地址中字节
         cmd[3] = static_cast<uint8_t>(addr & 0xFF);           // 地址低字节
         csSelect();
-        spi_.transmit(cmd, 4);
+        spiTransmitAndFlush(cmd, 4);  // 发送命令+地址并清空 RX FIFO
         spi_.receive(data, size);
         csDeselect();
     }
@@ -346,6 +349,19 @@ private:
         cs_.setLow();
     }
 
+    /**
+     * @brief SPI 发送并清空 RX FIFO (STM32G0 全双工模式下必须)
+     * @param data 发送数据
+     * @param size 数据长度
+     * @details 使用 TransmitReceive 确保接收端被正确消耗,
+     *          避免下次 Receive 调用时读到残留脏数据。
+     */
+    void spiTransmitAndFlush(const uint8_t* data, uint16_t size) {
+        uint8_t dummy[8];  // 命令最长 4 字节, 8 字节富余
+        uint16_t len = (size <= sizeof(dummy)) ? size : sizeof(dummy);
+        spi_.transmitReceive(data, dummy, len);
+    }
+
     /** @brief 发送写使能指令 */
     void writeEnable() {
         uint8_t cmd = W25Q64Cmd::WRITE_ENABLE;
@@ -373,14 +389,13 @@ private:
      *          - 全片擦除：最大 100s
      */
     void waitBusy() {
-        uint8_t cmd = W25Q64Cmd::READ_STATUS_REG1;
-        uint8_t status = 0;
+        uint8_t tx[2] = {W25Q64Cmd::READ_STATUS_REG1, 0xFF};
+        uint8_t rx[2] = {0};
         do {
             csSelect();
-            spi_.transmit(&cmd, 1);
-            spi_.receive(&status, 1);
+            spi_.transmitReceive(tx, rx, 2);
             csDeselect();
-        } while (status & W25Q64Param::STATUS_BUSY_BIT);
+        } while (rx[1] & W25Q64Param::STATUS_BUSY_BIT);
     }
 };
 

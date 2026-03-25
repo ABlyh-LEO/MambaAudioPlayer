@@ -52,15 +52,19 @@ public:
     }
 
     /**
-     * @brief 启动 DMA 空闲中断接收
+     * @brief 启动 DMA 接收 (定长接收)
      * @param data 接收数据缓冲区
-     * @param size 缓冲区最大长度
+     * @param size 要接收的精确字节数
      * @return HAL_OK 成功
-     * @details 使用 HAL_UARTEx_ReceiveToIdle_DMA 实现不定长接收，
-     *          当总线空闲时自动触发回调。
+     * @details 使用 HAL_UART_Receive_DMA 接收定长数据，不受 USB 帧间微小 IDLE 间隙影响。
      */
-    HAL_StatusTypeDef receiveToIdleDMA(uint8_t* data, uint16_t size) {
-        return HAL_UARTEx_ReceiveToIdle_DMA(huart_, data, size);
+    HAL_StatusTypeDef receiveDMA(uint8_t* data, uint16_t size) {
+        HAL_StatusTypeDef status = HAL_UART_Receive_DMA(huart_, data, size);
+        if (status == HAL_OK) {
+            // 禁用 DMA 半传输中断，要求必须收到完整一帧
+            __HAL_DMA_DISABLE_IT(huart_->hdmarx, DMA_IT_HT);
+        }
+        return status;
     }
 
     /**
@@ -82,6 +86,19 @@ public:
         // if (len > 0) {
         //     transmit(reinterpret_cast<const uint8_t*>(buf), static_cast<uint16_t>(len), 500);
         // }
+    }
+
+    /**
+     * @brief 清除 UART 错误标志并重置接收状态
+     * @details 清除 ORE/FE/NE/PE 等错误标志，若 RxState 非 READY 则中止接收。
+     *          用于在 HAL_UARTEx_ReceiveToIdle_DMA 失败后恢复正常状态。
+     */
+    void clearErrors() {
+        __HAL_UART_CLEAR_FLAG(huart_, UART_CLEAR_OREF | UART_CLEAR_FEF
+                                      | UART_CLEAR_NEF | UART_CLEAR_PEF);
+        if (huart_->RxState != HAL_UART_STATE_READY) {
+            HAL_UART_AbortReceive(huart_);
+        }
     }
 
     /** @brief 获取底层 UART 句柄 */

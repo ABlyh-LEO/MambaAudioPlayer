@@ -34,11 +34,12 @@ void User_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 }
 
 /**
- * @brief UART 接收事件回调
+ * @brief UART 接收完成回调
  */
-void User_UART_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size) {
+void User_UART_RxCpltCallback(UART_HandleTypeDef* huart) {
     if (huart->Instance == USART1) {
-        apl::AppMain::getInstance().onUartReceiveComplete(Size);
+        // 使用 huart->RxXferSize 获取我们请求的定长接收的字节数
+        apl::AppMain::getInstance().onUartReceiveComplete(huart->RxXferSize);
     }
 }
 

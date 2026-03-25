@@ -302,7 +302,7 @@ private:
                 if (lowBattery) {
                     state_ = SystemState::LOW_BATTERY;
                     ledIndicator_.setState(fml::LedState::LOW_BATTERY);
-                    alarmAudioStarted_ = false;
+
                 } else {
                     ledIndicator_.setState(fml::LedState::NORMAL);
                 }

@@ -36,8 +36,8 @@ namespace hdl {
  */
 class WS2812Driver {
 public:
-    /// 最大亮度比例 (0~255, 128 = 50%) - 限制功率消耗
-    static constexpr uint8_t MAX_BRIGHTNESS = 128;
+    /// 最大亮度比例 (0~255, 32 = 12.5%) - 限制功率消耗
+    static constexpr uint8_t MAX_BRIGHTNESS = 32;
 
     /**
      * @brief 构造函数

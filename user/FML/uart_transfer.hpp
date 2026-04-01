@@ -250,7 +250,12 @@ public:
             __enable_irq();
         }
 
-        // 2. 尽力而为：确保 DMA 接收始终处于活动状态 (防止 Overrun 后未成功重启)
+        // 2. 检查是否有底层 UART 错误 (如拔插瞬间产生的 ORE/FE/NE 错误)
+        if (uart_.getHandle()->ErrorCode != HAL_UART_ERROR_NONE) {
+            uart_.clearErrors();
+        }
+
+        // 3. 尽力而为：确保 DMA 接收始终处于活动状态 (防止 Overrun 后未成功重启)
         if (!uart_.isBusyRx()) {
             startReceive();
         }

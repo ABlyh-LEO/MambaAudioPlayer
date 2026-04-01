@@ -47,12 +47,12 @@ extern UART_HandleTypeDef huart1;
 
 namespace apl {
 
-/// 系统状态枚举
 enum class SystemState {
   NORMAL,        ///< 正常监控
   LOW_BATTERY,   ///< 低电量报警
   MUTED,         ///< 按键静音中 (60s)
-  AUDIO_TRANSFER ///< 音频传输中
+  AUDIO_TRANSFER,///< 音频传输中
+  SERIAL_AUDIO   ///< 串口命令播放音频中
 };
 
 /**
@@ -244,6 +244,7 @@ private:
   bool lastBtnState_ = true;       ///< 上次按键状态 (未按下=高)
   uint32_t btnPressTick_ = 0;      ///< 按键按下时间 (消抖用)
   bool alarmAudioStarted_ = false; ///< 报警音频是否已启动
+  uint8_t currentSerialTrack_ = 255; ///< 串口播放音频控制的轨道 (255=无效)
 
   /** @brief 私有构造函数 (单例) */
   AppMain() = default;
@@ -276,6 +277,10 @@ private:
    * @details 按下按键后 60s 内不进行音频播放
    */
   void onButtonPressed(uint32_t tick) {
+    if (state_ == SystemState::SERIAL_AUDIO || state_ == SystemState::AUDIO_TRANSFER) {
+      return; // 在串口命令播放音频或传输中被接管，忽略按键
+    }
+
     if (state_ == SystemState::LOW_BATTERY) {
       // 进入静音模式
       audioPlayer_.pause();
@@ -302,6 +307,33 @@ private:
     } else if (state_ == SystemState::AUDIO_TRANSFER) {
       state_ = SystemState::NORMAL;
       alarmAudioStarted_ = false;
+    }
+
+    // 串口音频控制优先级次之
+    uint8_t action, track;
+    if (uartTransfer_.getAudioCmd(action, track)) {
+      if (action == 1) { // 播放命令
+        if (state_ == SystemState::SERIAL_AUDIO) {
+          if (currentSerialTrack_ != track) {
+            currentSerialTrack_ = track;
+            audioPlayer_.playTrack(track, true); // true for looping
+          }
+        } else {
+          state_ = SystemState::SERIAL_AUDIO;
+          currentSerialTrack_ = track;
+          audioPlayer_.playTrack(track, true);
+        }
+      } else if (action == 0) { // 停止命令
+        if (state_ == SystemState::SERIAL_AUDIO) {
+          audioPlayer_.stop();
+          state_ = SystemState::NORMAL;
+          alarmAudioStarted_ = false; // 以便恢复正常的低电量逻辑
+        }
+      }
+    }
+
+    if (state_ == SystemState::SERIAL_AUDIO) {
+      return; // 串口控制播放期间，不响应低压报警等逻辑
     }
 
     // 电池状态检测
@@ -360,6 +392,7 @@ private:
       break;
 
     case SystemState::AUDIO_TRANSFER:
+    case SystemState::SERIAL_AUDIO:
       // 已在上面处理
       break;
     }

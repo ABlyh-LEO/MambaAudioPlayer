@@ -149,6 +149,7 @@ namespace Protocol {
     constexpr uint8_t CMD_DEFRAG         = 0x34;
     constexpr uint8_t CMD_QUERY_BATT_INFO = 0x35;  ///< 查询 I2C 电池详细信息 (上位机→下位机)
     constexpr uint8_t CMD_BATT_INFO_RESPONSE = 0x36; ///< 电池详细信息响应 (下位机→上位机)
+    constexpr uint8_t CMD_CONTROL_AUDIO   = 0x37;  ///< 串口音频控制命令 (上位机→下位机)
 }
 
 /// 数据包结构
@@ -281,6 +282,22 @@ public:
         statusInfo_.system_state = state;
     }
 
+    /**
+     * @brief 获取并清除挂起的音频控制命令 (由 AppMain 调用)
+     * @param action 输出动作 (0=停止, 1=播放)
+     * @param trackIdx 输出轨道索引
+     * @return true 如果有新命令, 否则 false
+     */
+    bool getAudioCmd(uint8_t& action, uint8_t& trackIdx) {
+        if (hasAudioCmd_) {
+            action = audioCmdAction_;
+            trackIdx = audioCmdTrack_;
+            hasAudioCmd_ = false;
+            return true;
+        }
+        return false;
+    }
+
 private:
     hal::Uart& uart_;             ///< UART 引用
     hdl::W25Q64Driver& flash_;    ///< Flash 驱动引用
@@ -301,6 +318,10 @@ private:
     volatile uint8_t  rxReadIdx_;   ///< 当前正在处理的缓冲区索引
     volatile uint8_t  rxCount_;     ///< 待处理的包数量
     SystemStatusInfo statusInfo_;  ///< 系统状态快照
+
+    volatile bool hasAudioCmd_ = false;  ///< 是否有待处理的音频控制命令
+    uint8_t audioCmdAction_ = 0;         ///< 音频控制动作 (0=停止, 1=播放)
+    uint8_t audioCmdTrack_ = 0;          ///< 音频控制轨道号
 
     /** @brief 启动一次新的数据接收 (定长 136 字节) */
     void startReceive() {
@@ -383,6 +404,7 @@ private:
             case Protocol::CMD_QUERY_STATUS:   handleQueryStatus();      break;
             case Protocol::CMD_DEFRAG:         handleDefrag();           break;
             case Protocol::CMD_QUERY_BATT_INFO: handleQueryBattInfo();    break;
+            case Protocol::CMD_CONTROL_AUDIO:  handleControlAudio(pkt);  break;
             default: break;
         }
     }
@@ -617,6 +639,18 @@ private:
         sendResponse(Protocol::CMD_BATT_INFO_RESPONSE, 
                      reinterpret_cast<const uint8_t*>(&info), 
                      sizeof(hdl::BatteryInfo));
+    }
+
+    /** @brief 处理串口控制音频指令 */
+    void handleControlAudio(const Packet& pkt) {
+        if (pkt.len < 2) { sendNak(NakError::BAD_PARAM); return; }
+        
+        audioCmdAction_ = pkt.data[0];
+        audioCmdTrack_  = pkt.data[1];
+        hasAudioCmd_    = true;
+        
+        // 要求: 每一条播放音频的命令在收到后都应该有应答信号, 即使是重复的
+        sendAck(0);
     }
 
     /**
